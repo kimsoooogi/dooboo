@@ -1,0 +1,58 @@
+# 보안 민감 파일
+.env
+*.json
+secrets/
+
+# 대용량 데이터 & 모델
+*.joblib
+*.h5
+*.pkl
+*.csv
+*.pv
+*.ppn
+data/
+datasets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+*.iml
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+ios/build/
+
+# macOS
+macos/Pods/
+macos/Flutter/ephemeral/
+macos/build/
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+
+# macOS 시스템
+.DS_Store
+.AppleDouble
+
+# IDE
+.vscode/
+.idea/
+*.swp
