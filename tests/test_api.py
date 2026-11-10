@@ -65,8 +65,8 @@ def test_prediction_returns_label_and_confidence(monkeypatch):
 
 
 def test_prediction_rejects_unsupported_extension(monkeypatch):
-    monkeypatch.setattr(api, "model_bundle", _valid_bundle())
     with TestClient(api.app) as client:
+        monkeypatch.setattr(api, "model_bundle", _valid_bundle())
         response = client.post(
             "/predict-audio",
             files={"file": ("sample.txt", b"not audio", "text/plain")},
@@ -75,8 +75,8 @@ def test_prediction_rejects_unsupported_extension(monkeypatch):
 
 
 def test_prediction_requires_model(monkeypatch):
-    monkeypatch.setattr(api, "model_bundle", None)
     with TestClient(api.app) as client:
+        monkeypatch.setattr(api, "model_bundle", None)
         response = client.post(
             "/predict-audio",
             files={"file": ("sample.wav", _wav_bytes(), "audio/wav")},
