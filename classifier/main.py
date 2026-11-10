@@ -37,7 +37,7 @@ TYPECAST_API_KEY = os.getenv("TYPECAST_API_KEY", "").strip()
 TYPECAST_VOICE_ID = os.getenv("TYPECAST_VOICE_ID", "").strip()
 
 CLASSIFICATION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg"}
-TRANSCRIPTION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga", ".webm", ".ogg"}
+TRANSCRIPTION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga", ".webm", ".ogg", ".flac"}
 MIME_TYPES = {
     ".wav": "audio/wav", ".m4a": "audio/mp4", ".mp3": "audio/mpeg",
     ".mp4": "audio/mp4", ".mpeg": "audio/mpeg", ".mpga": "audio/mpeg",
@@ -235,7 +235,8 @@ async def chat(request: Request, payload: ChatRequest) -> dict:
     instructions = (
         "당신은 한국어 음성비서 두부입니다. 답변은 자연스럽고 간결한 한국어로 합니다. "
         "사용자의 말투를 조롱하거나 진단하지 말고, 음성 어조 분류 결과는 응답 말투를 "
-        "조절하는 참고 정보로만 사용합니다. 분류 결과: " + payload.tone
+        "조절하는 참고 정보로만 사용합니다. 2~3문장, 300자 이내로 답변합니다. "
+        "분류 결과: " + payload.tone
     )
     body = {
         "model": OPENAI_CHAT_MODEL,
