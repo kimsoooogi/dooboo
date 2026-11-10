@@ -11,7 +11,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
-from features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
+try:
+    from .features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
+except ImportError:  # Running as a script from the classifier directory.
+    from features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
 
 CLASSES = (
     "far_loud", "far_normal", "far_small",
@@ -116,8 +119,12 @@ def split_dataset(X, y, groups, use_group_split: bool):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("../data"))
-    parser.add_argument("--output", type=Path, default=Path("random_forest_model.joblib"))
+    classifier_dir = Path(__file__).resolve().parent
+    repository_dir = classifier_dir.parent
+    parser.add_argument("--data-dir", type=Path, default=repository_dir / "data")
+    parser.add_argument(
+        "--output", type=Path, default=classifier_dir / "random_forest_model.joblib"
+    )
     parser.add_argument(
         "--groups-csv",
         type=Path,
