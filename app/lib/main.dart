@@ -61,11 +61,15 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   String? _speechFilePath;
 
   bool _isFinalizingRecording = false;
+  bool _isStartingRecording = false;
+  bool _isCleaningAudio = false;
 
   bool get _isBusy =>
       _state == AssistantState.initializing ||
       _state == AssistantState.processing ||
-      _isFinalizingRecording;
+      _isFinalizingRecording ||
+      _isStartingRecording ||
+      _isCleaningAudio;
 
   @override
   void initState() {
@@ -124,8 +128,17 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   }
 
   Future<void> _startRecording() async {
-    if (!_recorderOpened || _state != AssistantState.waiting) return;
+    if (!_recorderOpened ||
+        _state != AssistantState.waiting ||
+        _isStartingRecording ||
+        _isCleaningAudio) {
+      return;
+    }
+    _isStartingRecording = true;
+    if (mounted) setState(() {});
     try {
+      await _player.stop();
+      await _removeSpeechFile();
       var permission = await Permission.microphone.status;
       if (!permission.isGranted) permission = await Permission.microphone.request();
       if (!permission.isGranted) {
@@ -176,6 +189,9 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         }
       }
       _showError('녹음을 시작하지 못했습니다: $error');
+    } finally {
+      _isStartingRecording = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -211,6 +227,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         _uploadAudio(audioPath, '/predict-audio'),
       ]);
 
+      if (!mounted) return;
+
       final transcript = results[0]['text'];
       final prediction = results[1]['prediction'];
       if (transcript is! String || transcript.trim().isEmpty) {
@@ -230,6 +248,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
           )
           .timeout(_requestTimeout);
       final chatData = await _decodeJsonResponse(chatResponse);
+      if (!mounted) return;
       final answer = chatData['text'];
       if (answer is! String || answer.trim().isEmpty) {
         throw Exception('두부의 답변이 비어 있습니다.');
@@ -246,6 +265,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
             }),
           )
           .timeout(_requestTimeout);
+      if (!mounted) return;
       if (speechResponse.statusCode < 200 || speechResponse.statusCode >= 300) {
         throw HttpException('음성 합성 요청 실패 (${speechResponse.statusCode})');
       }
@@ -271,8 +291,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
 
       if (mounted) setState(() => _state = AssistantState.answering);
     } catch (error) {
-      await _player.stop();
-      await _removeSpeechFile();
+      await _stopSpeechAndClean();
       _showError('처리 중 오류가 발생했습니다: $error');
     } finally {
       if (completedAudioPath != null) {
@@ -300,14 +319,22 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   }
 
   Future<void> _stopSpeechAndClean() async {
-    await _player.stop();
+    try {
+      await _player.stop();
+    } catch (_) {
+      // Continue cleaning the generated file if the player has already stopped.
+    }
     await _removeSpeechFile();
   }
 
-  void _reset() {
+  Future<void> _reset() async {
+    if (!mounted || _isCleaningAudio) return;
+    _isCleaningAudio = true;
+    setState(() {});
+    await _stopSpeechAndClean();
     if (!mounted) return;
-    unawaited(_stopSpeechAndClean());
     setState(() {
+      _isCleaningAudio = false;
       _state = AssistantState.waiting;
       _error = '';
     });
@@ -325,6 +352,16 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
       // The platform player may already be disposed.
     }
     await _removeSpeechFile();
+    final recordingPath = _recordingPath;
+    _recordingPath = null;
+    if (recordingPath != null) {
+      try {
+        final recordingFile = File(recordingPath);
+        if (await recordingFile.exists()) await recordingFile.delete();
+      } catch (_) {
+        // Temporary recording cleanup is best-effort.
+      }
+    }
     if (_recorderOpened) {
       try {
         await _recorder.closeRecorder();
