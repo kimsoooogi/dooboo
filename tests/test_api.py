@@ -84,6 +84,21 @@ def test_prediction_requires_model(monkeypatch):
     assert response.status_code == 503
 
 
+def test_readiness_requires_classifier_model(monkeypatch):
+    with TestClient(api.app) as client:
+        monkeypatch.setattr(api, "model_bundle", None)
+        response = client.get("/ready")
+    assert response.status_code == 503
+
+
+def test_readiness_is_successful_with_model(monkeypatch):
+    with TestClient(api.app) as client:
+        monkeypatch.setattr(api, "model_bundle", _valid_bundle())
+        response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
 def test_prediction_rejects_empty_upload(monkeypatch):
     with TestClient(api.app) as client:
         monkeypatch.setattr(api, "model_bundle", _valid_bundle())
