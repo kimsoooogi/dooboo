@@ -52,8 +52,8 @@ def test_health_is_available_without_model(monkeypatch):
 
 
 def test_prediction_returns_label_and_confidence(monkeypatch):
-    monkeypatch.setattr(api, "model_bundle", _valid_bundle())
     with TestClient(api.app) as client:
+        monkeypatch.setattr(api, "model_bundle", _valid_bundle())
         response = client.post(
             "/predict-audio",
             files={"file": ("sample.wav", _wav_bytes(), "audio/wav")},
