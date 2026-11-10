@@ -1,5 +1,7 @@
 # 보안 민감 파일
 .env
+.env.*
+!.env.example
 *.json
 secrets/
 
@@ -28,7 +30,6 @@ build/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
 *.iml
 
 # iOS
