@@ -39,7 +39,7 @@ python -m classifier.train_model --data-dir data --output classifier/random_fore
 uvicorn classifier.main:app --host 0.0.0.0 --port 8001
 ```
 
-모델 파일이 없으면 서버는 시작되지만 `/predict-audio`는 HTTP 503을 반환합니다. 상태 확인은 `GET /health`입니다.
+모델 파일이 없으면 서버는 시작되지만 `/predict-audio`는 HTTP 503을 반환합니다. 상태 확인은 `GET /health`, 모델 준비 상태 확인은 `GET /ready`입니다. `/health`는 프로세스 생존 확인용이며 모델 미설치 시에도 `200`을 반환할 수 있습니다. 배포 오케스트레이터의 준비 상태 확인에는 `/ready`를 사용하세요.
 
 ```bash
 curl -X POST http://localhost:8001/predict-audio -F "file=@sample.wav"
