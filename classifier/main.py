@@ -36,8 +36,8 @@ OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-6.1-terra").strip()
 TYPECAST_API_KEY = os.getenv("TYPECAST_API_KEY", "").strip()
 TYPECAST_VOICE_ID = os.getenv("TYPECAST_VOICE_ID", "").strip()
 
-CLASSIFICATION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg", ".webm"}
-TRANSCRIPTION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga", ".webm"}
+CLASSIFICATION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg"}
+TRANSCRIPTION_EXTENSIONS = {".wav", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga", ".webm", ".ogg"}
 MIME_TYPES = {
     ".wav": "audio/wav", ".m4a": "audio/mp4", ".mp3": "audio/mpeg",
     ".mp4": "audio/mp4", ".mpeg": "audio/mpeg", ".mpga": "audio/mpeg",
@@ -58,7 +58,7 @@ model_bundle = None
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
-    tone: str = Field(default="near_normal", max_length=32)
+    tone: Literal["far_loud", "far_normal", "far_small", "near_loud", "near_normal", "near_small"] = "near_normal"
 
 
 class SpeechRequest(BaseModel):
