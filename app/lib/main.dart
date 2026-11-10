@@ -37,7 +37,6 @@ enum AssistantState { waiting, listening, processing, answering }
 
 class _VoiceAssistantState extends State<VoiceAssistant> {
   AssistantState _currentState = AssistantState.waiting;
-  late AnimationController _controller;
   late PorcupineManager _porcupineManager;
   FlutterSoundRecorder? _recorder;
   String predictionResult = "";
@@ -47,8 +46,11 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
   String? _filePath;
   bool _isRecording = false;
   
-  final String fastApiUrl = 'http://192.168.219.101:8001/predict-audio';
+  static const String serverHost = String.fromEnvironment('DOOBOO_SERVER_HOST', defaultValue: '192.168.219.101');
+  final String fastApiUrl = 'http://$serverHost:8001/predict-audio';
   final String apiKey = String.fromEnvironment('OPENAI_API_KEY');
+  final String typecastApiKey = String.fromEnvironment('TYPECAST_API_KEY');
+  final String porcupineAccessKey = String.fromEnvironment('PORCUPINE_ACCESS_KEY');
   final String openAiGptUrl = 'https://api.openai.com/v1/chat/completions';
   final String url = "https://typecast.ai/api/speak";
 
@@ -59,7 +61,7 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
     super.initState();
     _initializeRecorder(); 
     _initializePorcupine();
-    checkLocalNetworkAccess('192.168.0.3', 8001);
+    checkLocalNetworkAccess(serverHost, 8001);
   }
 
   void checkLocalNetworkAccess(String ipAddress, int port) async {
@@ -87,7 +89,7 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
 
   void _initializePorcupine() async {
     _porcupineManager = await PorcupineManager.fromKeywordPaths(
-      'RDB3NAY14hKp9XO5sT4UvbAduZSpB+tufB6AXnie6bm62kNlPmYsyQ==',
+      porcupineAccessKey,
       ["assets/wake_word.ppn"],
       wakeWordCallback,
       modelPath: "assets/porcupine_params_ko.pv");
@@ -149,7 +151,7 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
     try {
       var uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       var request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer $openAiApiKey'
+        ..headers['Authorization'] = 'Bearer $apiKey'
         ..files.add(await http.MultipartFile.fromPath('file', filePath))
         ..fields['model'] = 'whisper-1'
         ..fields['language'] = 'ko';
@@ -217,7 +219,7 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
   final url = Uri.parse("https://typecast.ai/api/speak");
   final headers = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer __plt4PtZvzGLAW9kyoFn7YQSUsYJPpPQkWmqwb4eZoTy', // Typecast API 토큰 입력
+    'Authorization': 'Bearer $typecastApiKey',
   };
   print(voiceTone);
   // 요청 페이로드 생성
@@ -280,7 +282,6 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
 
   @override
   void dispose() {
-    _controller.dispose();
     _porcupineManager.stop();
     _recorder!.closeRecorder();
     super.dispose();
