@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Run backend tests
-        run: pytest -q
+        run: python -m pytest -q
 
   flutter-analysis:
     runs-on: ubuntu-latest
