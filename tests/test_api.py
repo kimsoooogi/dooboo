@@ -192,6 +192,89 @@ def test_openai_response_text_parser_supports_responses_shape():
     assert api._extract_response_text(payload) == "두부가 답변합니다."
 
 
+
+def test_transcription_uses_current_model_and_korean_language_hint(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "안녕하세요."}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, data, files):
+            captured.update(url=url, headers=headers, data=data, files=files)
+            return FakeResponse()
+
+    monkeypatch.setattr(api, "OPENAI_API_KEY", "test-secret")
+    monkeypatch.setattr(api.httpx, "AsyncClient", FakeAsyncClient)
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/transcribe-audio",
+            files={"file": ("sample.wav", _wav_bytes(), "audio/wav")},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "안녕하세요."}
+    assert captured["url"] == "https://api.openai.com/v1/audio/transcriptions"
+    assert captured["headers"]["Authorization"] == "Bearer test-secret"
+    assert ("model", "gpt-transcribe") in captured["data"]
+    assert ("languages[]", "ko") in captured["data"]
+    assert captured["files"]["file"][0] == "sample.wav"
+
+
+def test_chat_calls_responses_api_and_extracts_text(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"output_text": "두부의 응답입니다."}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr(api, "OPENAI_API_KEY", "test-secret")
+    monkeypatch.setattr(api.httpx, "AsyncClient", FakeAsyncClient)
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/chat",
+            json={"message": "안녕", "tone": "near_normal"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "두부의 응답입니다."}
+    assert captured["url"] == "https://api.openai.com/v1/responses"
+    assert captured["json"]["model"] == api.OPENAI_CHAT_MODEL
+    assert captured["json"]["store"] is False
+
+
 def test_chat_rejects_arbitrary_tone_labels():
     with TestClient(api.app) as client:
         response = client.post(
