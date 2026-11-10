@@ -20,7 +20,7 @@ flutter pub get
 
 After running `flutter create`, add microphone permissions to the generated platform files:
 
-- Android: add `<uses-permission android:name="android.permission.RECORD_AUDIO" />` directly under the root `<manifest>` element in `android/app/src/main/AndroidManifest.xml`.
+- Android: add `<uses-permission android:name="android.permission.RECORD_AUDIO" />` and `<uses-permission android:name="android.permission.INTERNET" />` directly under the root `<manifest>` element in `android/app/src/main/AndroidManifest.xml`.
 - iOS: add `NSMicrophoneUsageDescription` to `ios/Runner/Info.plist` with a clear explanation such as `두부가 음성을 녹음해 요청 내용을 인식합니다.`.
 - For Android development against a local `http://` backend only, add `android:usesCleartextTraffic="true"` to the `<application>` element. Do not enable cleartext traffic in production; deploy HTTPS.
 
