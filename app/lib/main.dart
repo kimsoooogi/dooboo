@@ -261,6 +261,12 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
       final outputFile = File(outputPath);
       await outputFile.writeAsBytes(speechResponse.bodyBytes, flush: true);
       _speechFilePath = outputPath;
+      final playbackVolume = prediction.contains('loud')
+          ? 1.0
+          : prediction.contains('small')
+              ? 0.1
+              : 0.5;
+      await _player.setVolume(playbackVolume);
       await _player.play(DeviceFileSource(outputPath));
 
       if (mounted) setState(() => _state = AssistantState.answering);
