@@ -19,7 +19,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
+try:
+    from .features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
+except ImportError:  # Running with the classifier directory as the working directory.
+    from features import FEATURE_COUNT, FEATURE_NAMES, FEATURE_VERSION, extract_features
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR.parent / ".env", override=False)
