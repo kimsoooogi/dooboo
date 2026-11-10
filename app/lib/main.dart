@@ -54,9 +54,9 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   bool _recorderOpened = false;
   String _transcript = '';
   String _answer = '';
-  String _tone = 'near_normal';
   String _error = '';
   String? _recordingPath;
+  Timer? _recordingLimitTimer;
 
   bool get _isBusy =>
       _state == AssistantState.initializing ||
@@ -108,7 +108,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
     final request = http.MultipartRequest('POST', _endpoint(endpoint))
       ..files.add(await http.MultipartFile.fromPath('file', path));
     final streamed = await request.send().timeout(_requestTimeout);
-    final response = await http.Response.fromStream(streamed);
+    final response = await http.Response.fromStream(streamed).timeout(_requestTimeout);
     return _decodeJsonResponse(response);
   }
 
@@ -139,6 +139,12 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         _error = '';
         _state = AssistantState.recording;
       });
+      _recordingLimitTimer?.cancel();
+      _recordingLimitTimer = Timer(const Duration(seconds: 60), () {
+        if (mounted && _state == AssistantState.recording) {
+          _stopRecordingAndProcess();
+        }
+      });
     } catch (error) {
       _showError('녹음을 시작하지 못했습니다: $error');
     }
@@ -146,9 +152,12 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
 
   Future<void> _stopRecordingAndProcess() async {
     if (_state != AssistantState.recording) return;
+    String? completedAudioPath;
+    _recordingLimitTimer?.cancel();
     try {
       final recordedPath = await _recorder.stopRecorder();
       final audioPath = recordedPath ?? _recordingPath;
+      completedAudioPath = audioPath;
       if (audioPath == null || !await File(audioPath).exists()) {
         throw Exception('녹음 파일을 찾을 수 없습니다.');
       }
@@ -214,6 +223,15 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
     } catch (error) {
       _showError('처리 중 오류가 발생했습니다: $error');
     } finally {
+      if (completedAudioPath != null) {
+        try {
+          final file = File(completedAudioPath);
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // Temporary files are best-effort cleanup only.
+        }
+      }
+      _recordingPath = null;
       if (mounted && _state == AssistantState.processing) {
         setState(() => _state = AssistantState.waiting);
       }
@@ -238,6 +256,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
 
   @override
   void dispose() {
+    _recordingLimitTimer?.cancel();
     unawaited(_player.dispose());
     if (_recorderOpened) unawaited(_recorder.closeRecorder());
     super.dispose();
