@@ -19,13 +19,13 @@
 
 ## 학습 데이터
 
-저장소에 오디오 파일은 포함하지 않습니다. `data/` 아래에 `far_loud`, `far_normal`, `far_small`, `near_loud`, `near_normal`, `near_small` 폴더를 만들고 각 클래스의 오디오를 넣으세요. 지원 형식은 WAV, M4A, MP3, FLAC, OGG입니다. 일부 형식은 FFmpeg가 필요할 수 있습니다.
+저장소에 오디오 파일은 포함하지 않습니다. `data/` 아래에 `far_loud`, `far_normal`, `far_small`, `near_loud`, `near_normal`, `near_small` 폴더를 만들고 각 클래스의 오디오를 넣으세요. 지원 형식은 WAV, M4A, MP3, FLAC, OGG입니다. M4A·MP3 등은 FFmpeg 디코더가 필요하므로 시스템에 FFmpeg를 설치해야 합니다.
 
 ## 모델 학습
 
 ```bash
+# Run all commands from the repository root.
 pip install -r requirements.txt
-cd classifier
 python -m classifier.train_model --data-dir data --output classifier/random_forest_model.joblib
 ```
 
@@ -69,6 +69,7 @@ Flutter 앱은 `DOOBOO_API_BASE_URL`만 필요하며, OpenAI와 Typecast 키는 
 **중요:** `--dart-define`은 저장소에서 문자열을 제거할 뿐, 모바일 앱 바이너리에 포함된 키를 보호하지 않습니다. 이 프로젝트는 OpenAI·Typecast 호출을 백엔드 프록시로 이동했습니다. 다만 공용 배포에서는 별도의 사용자 인증과 엣지/API 게이트웨이 보호가 필요합니다. 현재 백엔드의 IP별 제한은 단일 프로세스에만 적용되는 기본 방어이며, 다중 인스턴스의 분산 제한이나 사용자 계정 인증을 대체하지 않습니다.
 
 앱의 기본 녹음 흐름은 `/transcribe-audio`와 `/predict-audio`를 병렬 호출하고, `/chat` 및 `/synthesize-speech`를 순차 호출합니다. 외부 제공업체 호출은 서버의 `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `TYPECAST_VOICE_ID` 설정이 필요합니다.
+
 ## 성능 수치
 
 기존 노트북의 Random Forest 96.67%, SVM 94.17% 출력은 기존 CSV와 당시 분할에 대한 기록이며 새 파이프라인의 재현 결과가 아닙니다. 새 학습 스크립트의 평가 결과를 확인한 뒤 README에 검증된 수치를 기재해야 합니다. 기존 94% 정확도 및 지연 시간 40% 단축 주장은 독립 재현 자료가 확인되기 전까지 검증된 성과로 간주하지 않습니다.
