@@ -35,3 +35,23 @@ def test_group_manifest_rejects_duplicate_files(tmp_path):
     )
     with pytest.raises(ValueError, match="Duplicate file"):
         _read_group_manifest(manifest, tmp_path)
+
+
+def test_group_manifest_rejects_parent_path_traversal(tmp_path):
+    manifest = tmp_path / "groups.csv"
+    manifest.write_text(
+        "file,group_id\n../outside.wav,source-1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="safe path"):
+        _read_group_manifest(manifest, tmp_path)
+
+
+def test_group_manifest_rejects_blank_fields(tmp_path):
+    manifest = tmp_path / "groups.csv"
+    manifest.write_text(
+        "file,group_id\nfar_loud/sample.wav,\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="group_id is empty"):
+        _read_group_manifest(manifest, tmp_path)
