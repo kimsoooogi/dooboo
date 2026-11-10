@@ -1,317 +1,476 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
-import 'package:flutter/material.dart';
-import 'package:porcupine_flutter/porcupine_manager.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:permission_handler/permission_handler.dart';
-import 'package:lottie/lottie.dart';
+import 'dart:io';
+
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
-  runApp(MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const DoobooApp());
 }
 
-class MyApp extends StatelessWidget {
+class DoobooApp extends StatelessWidget {
+  const DoobooApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AI Voice Assistant',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: VoiceAssistant(),
+      title: '두부',
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF557B67)),
+        useMaterial3: true,
+      ),
+      home: const VoiceAssistantPage(),
     );
   }
 }
 
-class VoiceAssistant extends StatefulWidget {
+enum AssistantState { initializing, waiting, recording, processing, answering, error }
+
+class VoiceAssistantPage extends StatefulWidget {
+  const VoiceAssistantPage({super.key});
+
   @override
-  _VoiceAssistantState createState() => _VoiceAssistantState();
+  State<VoiceAssistantPage> createState() => _VoiceAssistantPageState();
 }
 
-enum AssistantState { waiting, listening, processing, answering }
+class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
+  static const String _apiBaseUrl = String.fromEnvironment(
+    'DOOBOO_API_BASE_URL',
+    defaultValue: 'http://10.0.2.2:8001',
+  );
+  static const Duration _requestTimeout = Duration(seconds: 120);
 
-class _VoiceAssistantState extends State<VoiceAssistant> {
-  AssistantState _currentState = AssistantState.waiting;
-  late AnimationController _controller;
-  late PorcupineManager _porcupineManager;
-  FlutterSoundRecorder? _recorder;
-  String predictionResult = "";
-  String voiceTone = "";
-  String detectedText = " ";
-  String generatedResponse = " ";
-  String? _filePath;
-  bool _isRecording = false;
-  
-  final String fastApiUrl = 'http://192.168.219.101:8001/predict-audio';
-  final String apiKey = String.fromEnvironment('OPENAI_API_KEY');
-  final String openAiGptUrl = 'https://api.openai.com/v1/chat/completions';
-  final String url = "https://typecast.ai/api/speak";
+  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  final AudioPlayer _player = AudioPlayer();
 
-  AudioPlayer audioPlayer = AudioPlayer();
+  AssistantState _state = AssistantState.initializing;
+  bool _recorderOpened = false;
+  String _transcript = '';
+  String _answer = '';
+  String _error = '';
+  String? _recordingPath;
+  Timer? _recordingLimitTimer;
+  StreamSubscription<void>? _playerCompleteSubscription;
+  String? _speechFilePath;
+
+  bool _isFinalizingRecording = false;
+  bool _isStartingRecording = false;
+  bool _isCleaningAudio = false;
+
+  bool get _isBusy =>
+      _state == AssistantState.initializing ||
+      _state == AssistantState.processing ||
+      _isFinalizingRecording ||
+      _isStartingRecording ||
+      _isCleaningAudio;
 
   @override
   void initState() {
     super.initState();
-    _initializeRecorder(); 
-    _initializePorcupine();
-    checkLocalNetworkAccess('192.168.0.3', 8001);
+    _playerCompleteSubscription = _player.onPlayerComplete.listen((_) {
+      unawaited(_removeSpeechFile());
+    });
+    _initializeAudio();
   }
 
-  void checkLocalNetworkAccess(String ipAddress, int port) async {
+  Future<void> _initializeAudio() async {
     try {
-      final socket = await Socket.connect(ipAddress, port, timeout: Duration(seconds: 5));
-      print('Successfully connected to the local network');
-      socket.destroy();
-    } catch (e) {
-      print('Failed to connect to the local network: $e');
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text("Network Error"),
-          content: Text("Failed to connect to the server. Please check your network."),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text("OK"),
-            ),
-          ],
-        ),
+      await _recorder.openRecorder();
+      _recorderOpened = true;
+      if (!mounted) {
+        await _recorder.closeRecorder();
+        _recorderOpened = false;
+        return;
+      }
+      setState(() => _state = AssistantState.waiting);
+    } catch (error) {
+      _showError('녹음기를 초기화하지 못했습니다: $error');
+    }
+  }
+
+  Uri _endpoint(String path) => Uri.parse(_apiBaseUrl).resolve(path);
+
+  Map<String, String> get _jsonHeaders => const {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+
+  Future<Map<String, dynamic>> _decodeJsonResponse(http.Response response) async {
+    Map<String, dynamic> body = {};
+    try {
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is Map<String, dynamic>) body = decoded;
+    } on FormatException {
+      // Fall through to status-based error.
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final detail = body['detail'];
+      throw HttpException(
+        detail is String ? detail : '서버 요청 실패 (${response.statusCode})',
       );
     }
+    return body;
   }
 
-  void _initializePorcupine() async {
-    _porcupineManager = await PorcupineManager.fromKeywordPaths(
-      'RDB3NAY14hKp9XO5sT4UvbAduZSpB+tufB6AXnie6bm62kNlPmYsyQ==',
-      ["assets/wake_word.ppn"],
-      wakeWordCallback,
-      modelPath: "assets/porcupine_params_ko.pv");
-    _porcupineManager.start();
-  }
-  
-  Future<void> _initializeRecorder() async {
-    _recorder = FlutterSoundRecorder();
-    await _recorder!.openRecorder();
-    await _requestMicrophonePermission();
-  }
-
-  void wakeWordCallback(int keywordIndex) async {
-      if (keywordIndex == 0) {
-        // 웨이크 워드가 감지되었을 때 알림 소리를 재생합니다.
-        await audioPlayer.setSourceAsset('notification_sound.mp3');
-        await audioPlayer.resume();
-
-        // 상태를 listening으로 전환하고 녹음을 시작합니다.
-        setState(() => _currentState = AssistantState.listening);
-        _startRecording();
-    }
+  Future<Map<String, dynamic>> _uploadAudio(String path, String endpoint) async {
+    final request = http.MultipartRequest('POST', _endpoint(endpoint))
+      ..files.add(await http.MultipartFile.fromPath('file', path));
+    final streamed = await request.send().timeout(_requestTimeout);
+    final response = await http.Response.fromStream(streamed).timeout(_requestTimeout);
+    return _decodeJsonResponse(response);
   }
 
   Future<void> _startRecording() async {
-    if (_isRecording) return;
+    if (!_recorderOpened ||
+        _state != AssistantState.waiting ||
+        _isStartingRecording ||
+        _isCleaningAudio) {
+      return;
+    }
+    _isStartingRecording = true;
+    if (mounted) setState(() {});
+    try {
+      await _player.stop();
+      await _removeSpeechFile();
+      var permission = await Permission.microphone.status;
+      if (!permission.isGranted) permission = await Permission.microphone.request();
+      if (!permission.isGranted) {
+        throw Exception('마이크 권한이 허용되지 않았습니다.');
+      }
+      if (!mounted) return;
 
-    Directory tempDir = await getTemporaryDirectory();
-    _filePath = "${tempDir.path}/recording.wav";
-    await _recorder!.startRecorder(toFile: _filePath, codec: Codec.pcm16WAV);
-    setState(() => _isRecording = true);
+      final directory = await getTemporaryDirectory();
+      final filename = 'dooboo_${DateTime.now().microsecondsSinceEpoch}.wav';
+      _recordingPath = '${directory.path}/$filename';
 
-    Future.delayed(Duration(seconds: 3), () {
-      if (_isRecording) _stopRecording();
+      await _recorder.startRecorder(
+        toFile: _recordingPath,
+        codec: Codec.pcm16WAV,
+        sampleRate: 22050,
+        numChannels: 1,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _transcript = '';
+        _answer = '';
+        _error = '';
+        _state = AssistantState.recording;
+      });
+      _recordingLimitTimer?.cancel();
+      _recordingLimitTimer = Timer(const Duration(seconds: 60), () {
+        if (mounted && _state == AssistantState.recording) {
+          unawaited(_stopRecordingAndProcess());
+        }
+      });
+    } catch (error) {
+      try {
+        if (_recorderOpened && await _recorder.isRecording) {
+          await _recorder.stopRecorder();
+        }
+      } catch (_) {
+        // Recorder may already have stopped after a plugin error.
+      }
+      final path = _recordingPath;
+      _recordingPath = null;
+      if (path != null) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // Temporary file cleanup is best-effort.
+        }
+      }
+      _showError('녹음을 시작하지 못했습니다: $error');
+    } finally {
+      _isStartingRecording = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _removeSpeechFile() async {
+    final path = _speechFilePath;
+    _speechFilePath = null;
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Audio file cleanup is best-effort.
+    }
+  }
+
+  Future<void> _stopRecordingAndProcess() async {
+    if (_state != AssistantState.recording || _isFinalizingRecording) return;
+    _isFinalizingRecording = true;
+    String? completedAudioPath;
+    _recordingLimitTimer?.cancel();
+    try {
+      final recordedPath = await _recorder.stopRecorder();
+      final audioPath = recordedPath ?? _recordingPath;
+      completedAudioPath = audioPath;
+      if (audioPath == null || !await File(audioPath).exists()) {
+        throw Exception('녹음 파일을 찾을 수 없습니다.');
+      }
+
+      if (mounted) setState(() => _state = AssistantState.processing);
+
+      final results = await Future.wait([
+        _uploadAudio(audioPath, '/transcribe-audio'),
+        _uploadAudio(audioPath, '/predict-audio'),
+      ]);
+
+      if (!mounted) return;
+
+      final transcript = results[0]['text'];
+      final prediction = results[1]['prediction'];
+      if (transcript is! String || transcript.trim().isEmpty) {
+        throw Exception('음성 인식 결과가 비어 있습니다.');
+      }
+      if (prediction is! String || prediction.trim().isEmpty) {
+        throw Exception('어조 분류 결과가 비어 있습니다.');
+      }
+
+      if (mounted) setState(() => _transcript = transcript);
+
+      final chatResponse = await http
+          .post(
+            _endpoint('/chat'),
+            headers: _jsonHeaders,
+            body: jsonEncode({'message': transcript, 'tone': prediction}),
+          )
+          .timeout(_requestTimeout);
+      final chatData = await _decodeJsonResponse(chatResponse);
+      if (!mounted) return;
+      final answer = chatData['text'];
+      if (answer is! String || answer.trim().isEmpty) {
+        throw Exception('두부의 답변이 비어 있습니다.');
+      }
+      if (mounted) setState(() => _answer = answer);
+
+      final speechResponse = await http
+          .post(
+            _endpoint('/synthesize-speech'),
+            headers: _jsonHeaders,
+            body: jsonEncode({
+              'text': answer,
+              'tone': prediction.contains('small') ? 'whisper' : 'smart',
+            }),
+          )
+          .timeout(_requestTimeout);
+      if (!mounted) return;
+      if (speechResponse.statusCode < 200 || speechResponse.statusCode >= 300) {
+        throw HttpException('음성 합성 요청 실패 (${speechResponse.statusCode})');
+      }
+      if (speechResponse.bodyBytes.isEmpty) {
+        throw Exception('음성 합성 결과가 비어 있습니다.');
+      }
+
+      await _player.stop();
+      await _removeSpeechFile();
+      final directory = await getTemporaryDirectory();
+      final outputPath =
+          '${directory.path}/dooboo_reply_${DateTime.now().microsecondsSinceEpoch}.wav';
+      final outputFile = File(outputPath);
+      await outputFile.writeAsBytes(speechResponse.bodyBytes, flush: true);
+      _speechFilePath = outputPath;
+      final playbackVolume = prediction.contains('loud')
+          ? 1.0
+          : prediction.contains('small')
+              ? 0.1
+              : 0.5;
+      await _player.setVolume(playbackVolume);
+      await _player.play(DeviceFileSource(outputPath));
+
+      if (mounted) setState(() => _state = AssistantState.answering);
+    } catch (error) {
+      await _stopSpeechAndClean();
+      _showError('처리 중 오류가 발생했습니다: $error');
+    } finally {
+      if (completedAudioPath != null) {
+        try {
+          final file = File(completedAudioPath);
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // Temporary files are best-effort cleanup only.
+        }
+      }
+      _recordingPath = null;
+      _isFinalizingRecording = false;
+      if (mounted && _state == AssistantState.processing) {
+        setState(() => _state = AssistantState.waiting);
+      }
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _state = AssistantState.error;
     });
   }
 
-  Future<void> _stopRecording() async {
-    if (!_isRecording) return;
-
-    await _recorder!.stopRecorder();
-    setState(() => _isRecording = false);
-    setState(() => _currentState = AssistantState.processing);
-
-    if (_filePath != null) {
-      await _transcribeAudioWithOpenAI(_filePath!);
-      await _sendFileToFastAPI(_filePath!);
-      await _sendMessageToGPT(detectedText);
-    }
-    setState(() => _currentState = AssistantState.answering);
-  }
-
-  Future<void> _requestMicrophonePermission() async {
-    var status = await Permission.microphone.status;
-    if (!status.isGranted) await Permission.microphone.request();
-  }
-
-  Future<void> _transcribeAudioWithOpenAI(String filePath) async {
+  Future<void> _stopSpeechAndClean() async {
     try {
-      var uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
-      var request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer $openAiApiKey'
-        ..files.add(await http.MultipartFile.fromPath('file', filePath))
-        ..fields['model'] = 'whisper-1'
-        ..fields['language'] = 'ko';
-
-      var response = await request.send();
-      if (response.statusCode == 200) {
-        var responseData = await response.stream.bytesToString();
-        var jsonData = jsonDecode(responseData);
-        setState(() => detectedText = jsonData['text']);
-      }
-    } catch (e) {
-      print('Error transcribing audio with Whisper API: $e');
+      await _player.stop();
+    } catch (_) {
+      // Continue cleaning the generated file if the player has already stopped.
     }
+    await _removeSpeechFile();
   }
 
-  Future<void> _sendFileToFastAPI(String filePath) async {
+  Future<void> _reset() async {
+    if (!mounted || _isCleaningAudio) return;
+    _isCleaningAudio = true;
+    setState(() {});
+    await _stopSpeechAndClean();
+    if (!mounted) return;
+    setState(() {
+      _isCleaningAudio = false;
+      _state = AssistantState.waiting;
+      _error = '';
+    });
+  }
+
+  Future<void> _disposeAudioResources() async {
     try {
-      var uri = Uri.parse(fastApiUrl);
-      var request = http.MultipartRequest('POST', uri)
-        ..files.add(await http.MultipartFile.fromPath('file', filePath));
-
-      var response = await request.send();
-      if (response.statusCode == 200) {
-        predictionResult = await response.stream.bytesToString();
-        _adjustVolumeBasedOnPrediction(predictionResult);
+      await _player.stop();
+    } catch (_) {
+      // Continue releasing the remaining audio resources.
+    }
+    try {
+      await _player.dispose();
+    } catch (_) {
+      // The platform player may already be disposed.
+    }
+    await _removeSpeechFile();
+    final recordingPath = _recordingPath;
+    _recordingPath = null;
+    if (recordingPath != null) {
+      try {
+        final recordingFile = File(recordingPath);
+        if (await recordingFile.exists()) await recordingFile.delete();
+      } catch (_) {
+        // Temporary recording cleanup is best-effort.
       }
-    } catch (e) {
-      print('Error sending file to FastAPI: $e');
     }
-  }
-
-  void _adjustVolumeBasedOnPrediction(String prediction) {
-    print(prediction);
-    if (prediction.contains('loud')) {
-      voiceTone = "calm";
-      audioPlayer.setVolume(1.0);
-    }
-    else if (prediction.contains('small')){
-        voiceTone = "whisper";
-        audioPlayer.setVolume(0.1);
-    } 
-    else {
-      audioPlayer.setVolume(0.5);
-      voiceTone = "calm";
-    }
-  }
-
-  Future<void> _sendMessageToGPT(String message) async {
-    var uri = Uri.parse(openAiGptUrl);
-    var response = await http.post(
-      uri,
-      headers: {'Authorization': 'Bearer $openAiApiKey', 'Content-Type': 'application/json'},
-      body: jsonEncode({"model": "gpt-4", "messages": [{"role": "user", "content": message}]}),
-    );
-
-    if (response.statusCode == 200) {
-      var responseData = jsonDecode(utf8.decode(response.bodyBytes));
-      generatedResponse = responseData['choices'][0]['message']['content'];
-      await _speak(generatedResponse);
-    }
-  }
-  
-  Future<void> _speak(String text) async {
-  // Typecast API URL 및 헤더 설정
-  final url = Uri.parse("https://typecast.ai/api/speak");
-  final headers = {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer __plt4PtZvzGLAW9kyoFn7YQSUsYJPpPQkWmqwb4eZoTy', // Typecast API 토큰 입력
-  };
-  print(voiceTone);
-  // 요청 페이로드 생성
-  final payload = jsonEncode({
-    "actor_id": "622964d6255364be41659078", // 적절한 actor_id로 교체
-    "text": text, // 음성으로 변환할 텍스트
-    "lang": "auto",
-    "tempo": 1,
-    "volume": 100,
-    "pitch": 0,
-    "xapi_hd": true,
-    "max_seconds": 60,
-    "model_version": "latest",
-    "xapi_audio_format": "wav",
-    "emotion_tone_preset": "emotion-prompt",
-    "emotion_prompt": voiceTone
-  });
-
-  try {
-    // Typecast API 요청 보내기
-    var response = await http.post(url, headers: headers, body: payload);
-
-    // 성공적으로 응답을 받은 경우
-    if (response.statusCode == 200) {
-      final speakUrl = jsonDecode(response.body)['result']['speak_v2_url'];
-
-      for (int i=0; i<120; i++){
-        final statusResponse = await http.get(Uri.parse(speakUrl), headers: headers);
-        final result = jsonDecode(statusResponse.body)['result'];
-
-        if (result['status'] == 'done') {
-        // 4. 오디오 파일 다운로드
-        final audioResponse = await http.get(Uri.parse(result['audio_download_url']));
-        final filePath = await _saveAudioToTempFile(audioResponse.bodyBytes);
-
-        // 5. 오디오 파일 재생
-        await audioPlayer.setSourceDeviceFile(filePath);
-        await audioPlayer.resume();
-        break;
-      } else {
-        print("status: ${result['status']}, waiting 1 second");
-        await Future.delayed(Duration(seconds: 1));
+    if (_recorderOpened) {
+      try {
+        await _recorder.closeRecorder();
+      } catch (_) {
+        // The recorder may already be closed.
+      } finally {
+        _recorderOpened = false;
       }
-      }
-    } else {
-      print("Typecast API 음성재생 실패: ${response.statusCode}, ${response.reasonPhrase}");
     }
-  } catch (e) {
-    print("Typecast API 호출 중 오류 발생: $e");
   }
-}
-
-  Future<String> _saveAudioToTempFile(Uint8List audioBytes) async {
-  final dir = await getTemporaryDirectory();
-  final filePath = '${dir.path}/out.wav';
-  final file = File(filePath);
-  await file.writeAsBytes(audioBytes);
-  return filePath;
-}
 
   @override
   void dispose() {
-    _controller.dispose();
-    _porcupineManager.stop();
-    _recorder!.closeRecorder();
+    _recordingLimitTimer?.cancel();
+    unawaited(_playerCompleteSubscription?.cancel());
+    unawaited(_disposeAudioResources());
     super.dispose();
   }
 
-@override
-Widget build(BuildContext context) {
-  return Scaffold(
-    body: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 상황에 맞는 UI 상태에 따라 출력
-          if (_currentState == AssistantState.waiting) ...[
-            Text('두부를 불러주세요.'),
-            Image.asset('assets/stillWave.png'),
-          ] else if (_currentState == AssistantState.listening) ...[
-            Text('듣고 있습니다...'),
-            Lottie.asset('assets/movingWave.json'),
-          ] else if (_currentState == AssistantState.processing) ...[
-            Text("$detectedText"),
-            Image.asset('assets/stillWave.png'),
-            Text('답변을 생성 중입니다...'),
-          ] else if (_currentState == AssistantState.answering) ...[
-            Text("$detectedText"),
-            Image.asset('assets/stillWave.png'),
-            Text("$generatedResponse"),
-          ],
-        ],
+  @override
+  Widget build(BuildContext context) {
+    final statusText = switch (_state) {
+      AssistantState.initializing => '초기화 중입니다...',
+      AssistantState.waiting => '두부에게 말을 걸어보세요.',
+      AssistantState.recording => '듣고 있습니다...',
+      AssistantState.processing => '음성을 분석하고 답변을 만들고 있습니다...',
+      AssistantState.answering => '답변을 완료했습니다.',
+      AssistantState.error => '오류가 발생했습니다.',
+    };
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('두부 음성비서')),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Icon(
+                    _state == AssistantState.recording
+                        ? Icons.graphic_eq
+                        : Icons.record_voice_over,
+                    size: 72,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    statusText,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  if (_state == AssistantState.processing)
+                    const Center(child: CircularProgressIndicator()),
+                  if (_transcript.isNotEmpty) ...[
+                    const Text('인식한 내용', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(_transcript),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_answer.isNotEmpty) ...[
+                    const Text('두부의 답변', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(_answer),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_error.isNotEmpty) ...[
+                    Text(
+                      _error,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  FilledButton.icon(
+                    onPressed: _isBusy
+                        ? null
+                        : _state == AssistantState.recording
+                            ? _stopRecordingAndProcess
+                            : _state == AssistantState.error
+                                ? _reset
+                                : _startRecording,
+                    icon: Icon(
+                      _state == AssistantState.recording ? Icons.stop : Icons.mic,
+                    ),
+                    label: Text(
+                      _state == AssistantState.recording
+                          ? '녹음 종료 및 분석'
+                          : _state == AssistantState.error
+                              ? '다시 시도'
+                              : '녹음 시작',
+                    ),
+                  ),
+                  if (_state == AssistantState.answering) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: _reset,
+                      child: const Text('새 대화'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
