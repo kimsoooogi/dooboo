@@ -31,6 +31,8 @@ python -m classifier.train_model --data-dir data --output classifier/random_fore
 
 클래스별 최소 5개 이상의 정상 오디오 파일을 요구하며 stratified 80:20 홀드아웃 분할로 평가합니다. 동일 원본 음원에서 파생한 샘플이 있다면 원본 음원 단위 그룹 분할로 데이터 누수를 방지해야 합니다.
 
+동일한 원본 녹음에서 여러 조각을 만든 경우 `groups.csv`에 `file,group_id` 열을 두고 각 조각에 같은 `group_id`를 지정한 다음 `--groups-csv groups.csv`를 추가하세요. 파일 이름은 `data/` 폴더 기준 상대 경로여야 합니다. 이 옵션은 같은 원본 녹음의 조각이 학습·평가 세트에 동시에 들어가는 것을 방지합니다.
+
 ## API 실행
 
 ```bash
