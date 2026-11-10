@@ -10,6 +10,7 @@ secrets/
 *.h5
 *.pkl
 *.csv
+!groups.example.csv
 *.pv
 *.ppn
 data/
