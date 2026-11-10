@@ -50,6 +50,13 @@ curl -X POST http://localhost:8001/predict-audio -F "file=@sample.wav"
 - OpenAI 및 Typecast 비밀키는 모바일 앱에 넣지 마세요. 앱 바이너리에서 추출될 수 있으므로 서버 측 프록시와 환경변수로 관리해야 합니다.
 - 실제 배포에서는 HTTPS, 인증, 요청 제한을 적용하세요. 학습 데이터와 모델 파일은 저장소에 커밋하지 않습니다.
 
+## Flutter 앱 설정 및 보안 한계
+
+현재 Flutter 클라이언트는 `DOOBOO_SERVER_HOST`, `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `PORCUPINE_ACCESS_KEY`를 빌드 환경에서 전달받도록 정리했습니다. 예를 들어 개발 환경에서는 `--dart-define`으로 값을 전달할 수 있습니다.
+
+**중요:** `--dart-define`은 저장소에서 문자열을 제거할 뿐, 모바일 앱 바이너리에 포함된 키를 보호하지 않습니다. 따라서 OpenAI, Typecast, Porcupine 키를 이 방식으로 실제 배포하는 것은 안전하지 않습니다. 운영 환경에서는 인증정보를 서버 측에 두고 Flutter 앱은 자체 백엔드만 호출하도록 API 프록시를 추가해야 합니다. 이 저장소에는 해당 Whisper/GPT/TTS 프록시가 아직 구현되어 있지 않습니다.
+
+현재 앱의 외부 API 호출 흐름과 공급자별 응답 형식은 실제 기기에서 검증되지 않았습니다. 또한 로컬 FastAPI 주소는 `DOOBOO_SERVER_HOST`로 지정해야 합니다.
 ## 성능 수치
 
 기존 노트북의 Random Forest 96.67%, SVM 94.17% 출력은 기존 CSV와 당시 분할에 대한 기록이며 새 파이프라인의 재현 결과가 아닙니다. 새 학습 스크립트의 평가 결과를 확인한 뒤 README에 검증된 수치를 기재해야 합니다. 기존 94% 정확도 및 지연 시간 40% 단축 주장은 독립 재현 자료가 확인되기 전까지 검증된 성과로 간주하지 않습니다.
