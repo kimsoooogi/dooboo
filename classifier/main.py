@@ -1,72 +1,71 @@
-from fastapi import FastAPI, UploadFile, File
+"""FastAPI inference service for the Dooboo tone classifier."""
+from pathlib import Path
+import os, tempfile
 import joblib
 import numpy as np
-import librosa
-from pydub import AudioSegment
-import os
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
+from features import FEATURE_COUNT, FEATURE_VERSION, extract_features
 
-app = FastAPI()
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = Path(os.getenv("DOOBOO_MODEL_PATH", BASE_DIR / "random_forest_model.joblib"))
+MAX_UPLOAD_BYTES = int(os.getenv("DOOBOO_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+ALLOWED_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg"}
+app = FastAPI(title="Dooboo Tone Classifier", version="2.0.0")
+model_bundle = None
 
-# 학습된 Random Forest 모델 로드
-model = joblib.load("random_forest_model.joblib")
+@app.on_event("startup")
+def load_model():
+    global model_bundle
+    if not MODEL_PATH.is_file():
+        model_bundle = None
+        return
+    bundle = joblib.load(MODEL_PATH)
+    if not isinstance(bundle, dict) or "model" not in bundle:
+        raise RuntimeError("Unsupported model artifact; retrain with train_model.py.")
+    if bundle.get("feature_version") != FEATURE_VERSION or bundle.get("feature_count") != FEATURE_COUNT:
+        raise RuntimeError("Model feature schema does not match inference pipeline.")
+    model_bundle = bundle
 
-# 상위 10개 피처 인덱스 (전체 161차원 중 중요도 기반 선정)
-TOP_FEATURE_INDICES = [308, 33, 170, 315, 169, 41, 43, 172, 44, 168]
-
-
-def extract_features(file_path: str) -> np.ndarray:
-    """
-    오디오 파일에서 161차원 피처를 추출한 뒤 상위 10개만 반환합니다.
-
-    지원 형식: .wav, .m4a
-    추출 피처: MFCC, Mel-spectrogram, Chroma STFT, Spectral Contrast, Tonnetz
-    """
-    # m4a → wav 변환
-    if file_path.endswith(".m4a"):
-        audio = AudioSegment.from_file(file_path, format="m4a")
-        temp_path = "temp.wav"
-        audio.export(temp_path, format="wav")
-        y, sr = librosa.load(temp_path)
-        os.remove(temp_path)
-    else:
-        y, sr = librosa.load(file_path)
-
-    # 피처 추출
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    mel   = librosa.feature.melspectrogram(y=y, sr=sr)
-    chroma   = librosa.feature.chroma_stft(y=y, sr=sr)
-    contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-    tonnetz  = librosa.feature.tonnetz(y=librosa.effects.harmonic(y), sr=sr)
-
-    # mean + std 집계 → 161차원 벡터
-    feature_vector = np.concatenate([
-        np.mean(mfccs, axis=1),    np.std(mfccs, axis=1),
-        np.mean(mel, axis=1),      np.std(mel, axis=1),
-        np.mean(chroma, axis=1),   np.std(chroma, axis=1),
-        np.mean(contrast, axis=1), np.std(contrast, axis=1),
-        np.mean(tonnetz, axis=1),  np.std(tonnetz, axis=1),
-    ])
-
-    # 상위 10개 피처만 선택 (추론 속도 최적화)
-    return feature_vector[TOP_FEATURE_INDICES]
-
+@app.get("/health")
+def health():
+    return {"status": "ok", "model_loaded": model_bundle is not None, "feature_version": FEATURE_VERSION}
 
 @app.post("/predict-audio")
 async def predict_audio(file: UploadFile = File(...)):
-    """
-    음성 파일을 받아 어조 클래스를 반환합니다.
+    if model_bundle is None:
+        raise HTTPException(status_code=503, detail="Model missing; train it with train_model.py.")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported audio format.")
+    temp_path = None
+    try:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded audio is empty.")
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Audio exceeds upload size limit.")
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp:
+            temp.write(content)
+            temp_path = temp.name
+        features = await run_in_threadpool(extract_features, temp_path)
+        sample = features.reshape(1, -1)
+        model = model_bundle["model"]
+        result = {"prediction": str(model.predict(sample)[0])}
+        if hasattr(model, "predict_proba"):
+            result["confidence"] = float(np.max(model.predict_proba(sample)[0]))
+        return result
+    except HTTPException:
+        raise
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Unable to process audio: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Audio inference failed.") from exc
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        await file.close()
 
-    반환값 예시: "near_normal", "far_loud", "near_small" 등 6개 클래스
-    """
-    temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as f:
-        f.write(await file.read())
-
-    features   = extract_features(temp_path)
-    os.remove(temp_path)
-
-    prediction = model.predict([features])
-    return {"prediction": str(prediction[0])}
-
-
-# 실행: uvicorn main:app --reload
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=False)
