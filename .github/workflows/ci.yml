@@ -2,18 +2,23 @@ name: Dooboo CI
 
 on:
   push:
-    branches: ["main", "fix/**"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
+
+concurrency:
+  group: dooboo-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   python-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: '3.11'
           cache: pip
       - name: Install audio decoders
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
@@ -21,13 +26,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
+      - name: Check Python syntax
+        run: python -m compileall -q classifier tests
       - name: Run backend tests
         run: python -m pytest -q
 
   flutter-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
