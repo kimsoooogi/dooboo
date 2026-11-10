@@ -29,11 +29,29 @@ def _read_group_manifest(manifest_path: Path, data_dir: Path) -> dict[str, str]:
         reader = csv.DictReader(handle)
         if not reader.fieldnames or not {"file", "group_id"}.issubset(reader.fieldnames):
             raise ValueError("Group manifest must contain 'file' and 'group_id' columns.")
-        for row in reader:
-            relative_name = Path(row["file"]).as_posix()
-            group_id = row["group_id"].strip()
-            if not relative_name or not group_id:
-                raise ValueError("Group manifest contains an empty file or group_id.")
+        for line_number, row in enumerate(reader, start=2):
+            raw_file = row.get("file")
+            raw_group_id = row.get("group_id")
+            if not isinstance(raw_file, str) or not raw_file.strip():
+                raise ValueError(f"Group manifest line {line_number}: file is empty.")
+            if not isinstance(raw_group_id, str) or not raw_group_id.strip():
+                raise ValueError(f"Group manifest line {line_number}: group_id is empty.")
+
+            relative_path = Path(raw_file.strip())
+            if (
+                relative_path.is_absolute()
+                or ".." in relative_path.parts
+                or len(relative_path.parts) < 2
+                or relative_path.parts[0] not in CLASSES
+            ):
+                raise ValueError(
+                    f"Group manifest line {line_number}: file must be a safe path "
+                    "relative to the data directory and inside one of the six class folders."
+                )
+            relative_name = relative_path.as_posix()
+            group_id = raw_group_id.strip()
+            if len(group_id) > 256:
+                raise ValueError(f"Group manifest line {line_number}: group_id is too long.")
             if relative_name in groups:
                 raise ValueError(f"Duplicate file in group manifest: {relative_name}")
             groups[relative_name] = group_id
