@@ -29,7 +29,7 @@ cd classifier
 python train_model.py --data-dir ../data --output random_forest_model.joblib
 ```
 
-클래스별 최소 2개 이상의 정상 오디오 파일을 요구하며 stratified 80:20 홀드아웃 분할로 평가합니다. 동일 원본 음원에서 파생한 샘플이 있다면 원본 음원 단위 그룹 분할로 데이터 누수를 방지해야 합니다.
+클래스별 최소 5개 이상의 정상 오디오 파일을 요구하며 stratified 80:20 홀드아웃 분할로 평가합니다. 동일 원본 음원에서 파생한 샘플이 있다면 원본 음원 단위 그룹 분할로 데이터 누수를 방지해야 합니다.
 
 ## API 실행
 
