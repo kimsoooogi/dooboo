@@ -20,7 +20,7 @@ CLASSES = (
     "far_loud", "far_normal", "far_small",
     "near_loud", "near_normal", "near_small",
 )
-SUPPORTED_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg", ".webm"}
+SUPPORTED_EXTENSIONS = {".wav", ".m4a", ".mp3", ".flac", ".ogg"}
 
 
 def _read_group_manifest(manifest_path: Path, data_dir: Path) -> dict[str, str]:
