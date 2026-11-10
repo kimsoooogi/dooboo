@@ -57,6 +57,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   String _error = '';
   String? _recordingPath;
   Timer? _recordingLimitTimer;
+  StreamSubscription<void>? _playerCompleteSubscription;
+  String? _speechFilePath;
 
   bool _isFinalizingRecording = false;
 
@@ -68,6 +70,9 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   @override
   void initState() {
     super.initState();
+    _playerCompleteSubscription = _player.onPlayerComplete.listen((_) {
+      unawaited(_removeSpeechFile());
+    });
     _initializeAudio();
   }
 
@@ -75,7 +80,11 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
     try {
       await _recorder.openRecorder();
       _recorderOpened = true;
-      if (!mounted) return;
+      if (!mounted) {
+        await _recorder.closeRecorder();
+        _recorderOpened = false;
+        return;
+      }
       setState(() => _state = AssistantState.waiting);
     } catch (error) {
       _showError('녹음기를 초기화하지 못했습니다: $error');
@@ -122,6 +131,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
       if (!permission.isGranted) {
         throw Exception('마이크 권한이 허용되지 않았습니다.');
       }
+      if (!mounted) return;
 
       final directory = await getTemporaryDirectory();
       final filename = 'dooboo_${DateTime.now().microsecondsSinceEpoch}.wav';
@@ -148,7 +158,36 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         }
       });
     } catch (error) {
+      try {
+        if (_recorderOpened && await _recorder.isRecording) {
+          await _recorder.stopRecorder();
+        }
+      } catch (_) {
+        // Recorder may already have stopped after a plugin error.
+      }
+      final path = _recordingPath;
+      _recordingPath = null;
+      if (path != null) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // Temporary file cleanup is best-effort.
+        }
+      }
       _showError('녹음을 시작하지 못했습니다: $error');
+    }
+  }
+
+  Future<void> _removeSpeechFile() async {
+    final path = _speechFilePath;
+    _speechFilePath = null;
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Audio file cleanup is best-effort.
     }
   }
 
@@ -214,11 +253,14 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         throw Exception('음성 합성 결과가 비어 있습니다.');
       }
 
+      await _player.stop();
+      await _removeSpeechFile();
       final directory = await getTemporaryDirectory();
       final outputPath =
           '${directory.path}/dooboo_reply_${DateTime.now().microsecondsSinceEpoch}.wav';
       final outputFile = File(outputPath);
       await outputFile.writeAsBytes(speechResponse.bodyBytes, flush: true);
+      _speechFilePath = outputPath;
       await _player.play(DeviceFileSource(outputPath));
 
       if (mounted) setState(() => _state = AssistantState.answering);
@@ -251,6 +293,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
 
   void _reset() {
     if (!mounted) return;
+    unawaited(_player.stop());
+    unawaited(_removeSpeechFile());
     setState(() {
       _state = AssistantState.waiting;
       _error = '';
@@ -260,6 +304,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   @override
   void dispose() {
     _recordingLimitTimer?.cancel();
+    unawaited(_playerCompleteSubscription?.cancel());
+    unawaited(_removeSpeechFile());
     unawaited(_player.dispose());
     if (_recorderOpened) unawaited(_recorder.closeRecorder());
     super.dispose();
