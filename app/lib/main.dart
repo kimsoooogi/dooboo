@@ -203,7 +203,7 @@ class _VoiceAssistantState extends State<VoiceAssistant> {
     var uri = Uri.parse(openAiGptUrl);
     var response = await http.post(
       uri,
-      headers: {'Authorization': 'Bearer $openAiApiKey', 'Content-Type': 'application/json'},
+      headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'},
       body: jsonEncode({"model": "gpt-4", "messages": [{"role": "user", "content": message}]}),
     );
 
