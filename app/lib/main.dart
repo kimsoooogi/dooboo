@@ -58,10 +58,12 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   String? _recordingPath;
   Timer? _recordingLimitTimer;
 
+  bool _isFinalizingRecording = false;
+
   bool get _isBusy =>
       _state == AssistantState.initializing ||
-      _state == AssistantState.recording ||
-      _state == AssistantState.processing;
+      _state == AssistantState.processing ||
+      _isFinalizingRecording;
 
   @override
   void initState() {
@@ -142,7 +144,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
       _recordingLimitTimer?.cancel();
       _recordingLimitTimer = Timer(const Duration(seconds: 60), () {
         if (mounted && _state == AssistantState.recording) {
-          _stopRecordingAndProcess();
+          unawaited(_stopRecordingAndProcess());
         }
       });
     } catch (error) {
@@ -151,7 +153,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   }
 
   Future<void> _stopRecordingAndProcess() async {
-    if (_state != AssistantState.recording) return;
+    if (_state != AssistantState.recording || _isFinalizingRecording) return;
+    _isFinalizingRecording = true;
     String? completedAudioPath;
     _recordingLimitTimer?.cancel();
     try {
@@ -178,7 +181,6 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         throw Exception('어조 분류 결과가 비어 있습니다.');
       }
 
-      _tone = prediction;
       if (mounted) setState(() => _transcript = transcript);
 
       final chatResponse = await http
@@ -232,6 +234,7 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
         }
       }
       _recordingPath = null;
+      _isFinalizingRecording = false;
       if (mounted && _state == AssistantState.processing) {
         setState(() => _state = AssistantState.waiting);
       }
