@@ -29,7 +29,7 @@ def load_dataset(data_dir: Path):
     for failure in failures:
         print(f"Skipped unreadable file: {failure}")
     counts = {label: labels.count(label) for label in CLASSES}
-    insufficient = [label for label, count in counts.items() if count < 2]
+    insufficient = [label for label, count in counts.items() if count < 5]
     if insufficient:
         raise RuntimeError(f"Need at least 2 readable files per class: {insufficient}")
     return np.vstack(rows), np.asarray(labels)
