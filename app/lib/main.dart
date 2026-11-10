@@ -314,12 +314,25 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
   }
 
   Future<void> _disposeAudioResources() async {
-    await _player.stop();
-    await _player.dispose();
+    try {
+      await _player.stop();
+    } catch (_) {
+      // Continue releasing the remaining audio resources.
+    }
+    try {
+      await _player.dispose();
+    } catch (_) {
+      // The platform player may already be disposed.
+    }
     await _removeSpeechFile();
     if (_recorderOpened) {
-      await _recorder.closeRecorder();
-      _recorderOpened = false;
+      try {
+        await _recorder.closeRecorder();
+      } catch (_) {
+        // The recorder may already be closed.
+      } finally {
+        _recorderOpened = false;
+      }
     }
   }
 
@@ -328,7 +341,6 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
     _recordingLimitTimer?.cancel();
     unawaited(_playerCompleteSubscription?.cancel());
     unawaited(_disposeAudioResources());
-    if (_recorderOpened) unawaited(_recorder.closeRecorder());
     super.dispose();
   }
 
