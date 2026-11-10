@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Flutter stable with Dart 3.9 or later.
+- Flutter stable with Dart 3.10 or later.
 - A running Dooboo FastAPI backend.
 - Microphone permission on the target device.
 
@@ -16,8 +16,15 @@ flutter create --platforms=android,ios .
 flutter pub get
 ```
 
-## Run
+## Platform permissions
 
+After running `flutter create`, add microphone permissions to the generated platform files:
+
+- Android: add `<uses-permission android:name="android.permission.RECORD_AUDIO" />` directly under the root `<manifest>` element in `android/app/src/main/AndroidManifest.xml`.
+- iOS: add `NSMicrophoneUsageDescription` to `ios/Runner/Info.plist` with a clear explanation such as `두부가 음성을 녹음해 요청 내용을 인식합니다.`.
+- For Android development against a local `http://` backend only, add `android:usesCleartextTraffic="true"` to the `<application>` element. Do not enable cleartext traffic in production; deploy HTTPS.
+
+## Run
 Android emulator:
 
 ```bash
@@ -30,7 +37,7 @@ Physical Android/iOS device on the same LAN:
 flutter run --dart-define=DOOBOO_API_BASE_URL=http://YOUR_COMPUTER_LAN_IP:8001
 ```
 
-Use HTTPS for deployment. Android may require a development-only cleartext traffic exception for local HTTP in `android/app/src/main/AndroidManifest.xml`; do not carry that exception into a production release.
+Use HTTPS for deployment. Do not ship the Android development-only cleartext traffic exception in a production release.
 
 ## Audio flow
 
