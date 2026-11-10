@@ -28,7 +28,12 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR.parent / ".env", override=False)
 logger = logging.getLogger("dooboo.api")
 
-MODEL_PATH = Path(os.getenv("DOOBOO_MODEL_PATH", BASE_DIR / "random_forest_model.joblib"))
+_configured_model_path = Path(os.getenv("DOOBOO_MODEL_PATH", "random_forest_model.joblib"))
+MODEL_PATH = (
+    _configured_model_path
+    if _configured_model_path.is_absolute()
+    else BASE_DIR / _configured_model_path
+)
 MAX_UPLOAD_BYTES = int(os.getenv("DOOBOO_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "gpt-transcribe").strip()
@@ -137,6 +142,13 @@ def load_model() -> None:
     _check_model_bundle(loaded)
     model_bundle = loaded
     logger.info("Loaded classifier artifact: %s", MODEL_PATH)
+
+
+@app.get("/ready")
+def readiness() -> dict:
+    if model_bundle is None:
+        raise HTTPException(status_code=503, detail="Classifier model is not installed.")
+    return {"status": "ready", "feature_version": FEATURE_VERSION}
 
 
 @app.get("/health")
