@@ -265,6 +265,8 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
 
       if (mounted) setState(() => _state = AssistantState.answering);
     } catch (error) {
+      await _player.stop();
+      await _removeSpeechFile();
       _showError('처리 중 오류가 발생했습니다: $error');
     } finally {
       if (completedAudioPath != null) {
@@ -291,22 +293,35 @@ class _VoiceAssistantPageState extends State<VoiceAssistantPage> {
     });
   }
 
+  Future<void> _stopSpeechAndClean() async {
+    await _player.stop();
+    await _removeSpeechFile();
+  }
+
   void _reset() {
     if (!mounted) return;
-    unawaited(_player.stop());
-    unawaited(_removeSpeechFile());
+    unawaited(_stopSpeechAndClean());
     setState(() {
       _state = AssistantState.waiting;
       _error = '';
     });
   }
 
+  Future<void> _disposeAudioResources() async {
+    await _player.stop();
+    await _player.dispose();
+    await _removeSpeechFile();
+    if (_recorderOpened) {
+      await _recorder.closeRecorder();
+      _recorderOpened = false;
+    }
+  }
+
   @override
   void dispose() {
     _recordingLimitTimer?.cancel();
     unawaited(_playerCompleteSubscription?.cancel());
-    unawaited(_removeSpeechFile());
-    unawaited(_player.dispose());
+    unawaited(_disposeAudioResources());
     if (_recorderOpened) unawaited(_recorder.closeRecorder());
     super.dispose();
   }
